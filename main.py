@@ -16,6 +16,8 @@ from decagon.deep.model import DecagonModel
 from decagon.deep.minibatch import EdgeMinibatchIterator
 from decagon.utility import rank_metrics, preprocessing
 
+import csv
+
 # Train on CPU (hide GPU) due to memory constraints
 os.environ['CUDA_VISIBLE_DEVICES'] = ""
 
@@ -78,6 +80,40 @@ def get_accuracy_scores(edges_pos, edges_neg, edge_type):
 
     return roc_sc, aupr_sc, apk_sc
 
+def import_ddi():
+    ddi = 'KnownDDI.txt'
+    
+    # Import data 
+    # Create dictionary with keys as edge types
+    relation_type = {}
+    drugs = {}
+    
+    count = 0
+    count_drugs = 0
+    with open(ddi, newline='') as csvfile:
+         line = csv.reader(csvfile, delimiter=',')
+         for row in line:
+             if count == 1:
+                 print(row)
+                 print(row[:2])
+             if count != 0:
+                 if row[2] in relation_type:
+                     relation_type[row[2]].append(row[:2])
+                 else:
+                     relation_type[row[2]] = [row[:2]]
+                # create index
+                 if row[0] not in drugs:
+                     drugs[row[0]] = count_drugs
+                     count_drugs += 1
+                 
+                 if row[1] not in drugs:
+                     drugs[row[1]] = count_drugs
+                     count_drugs += 1
+                 
+             count = count + 1
+    
+    print('Imported DDI Data which contained ', count_drugs, ' drugs types')
+    return relation_type, drugs
 
 def construct_placeholders(edge_types):
     placeholders = {
@@ -115,8 +151,8 @@ def construct_placeholders(edge_types):
 
 val_test_size = 0.05
 n_genes = 500
-n_drugs = 400
-n_drugdrug_rel_types = 3
+n_drugs = 1710 # DDI Dataset
+n_drugdrug_rel_types = 86 # DDI Dataset
 gene_net = nx.planted_partition_graph(50, 10, 0.2, 0.05, seed=42)
 
 gene_adj = nx.adjacency_matrix(gene_net)
@@ -125,13 +161,22 @@ gene_degrees = np.array(gene_adj.sum(axis=0)).squeeze()
 gene_drug_adj = sp.csr_matrix((10 * np.random.randn(n_genes, n_drugs) > 15).astype(int))
 drug_gene_adj = gene_drug_adj.transpose(copy=True)
 
+
+# import drug dictionary [relation: drug, drug]
+[ddi_relations, index] = import_ddi()
+
 drug_drug_adj_list = []
 tmp = np.dot(drug_gene_adj, gene_drug_adj)
-for i in range(n_drugdrug_rel_types):
+for relation in ddi_relations:
     mat = np.zeros((n_drugs, n_drugs))
-    for d1, d2 in combinations(list(range(n_drugs)), 2):
-        if tmp[d1, d2] == i + 4:
-            mat[d1, d2] = mat[d2, d1] = 1.
+    
+    # orginally iterated through all possible combinations in decagon code, 
+    # that is not necessary. Set vallue to 1 for mat where edge exists
+    for edge in ddi_relations[relation]:
+        d1 = index[edge[0]]
+        d2 = index[edge[1]]
+        mat[d1, d2] = mat[d2, d1] = 1.
+        
     drug_drug_adj_list.append(sp.csr_matrix(mat))
 drug_degrees_list = [np.array(drug_adj.sum(axis=0)).squeeze() for drug_adj in drug_drug_adj_list]
 
